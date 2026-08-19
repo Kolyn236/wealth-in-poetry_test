@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - agent/wealth-poetry-solver
+  pull_request:
+    branches:
+      - main
 
 jobs:
   scan:
