@@ -21,6 +21,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install fast reverse-search backend
+        run: python -m pip install --disable-pip-version-check coincurve
+
       - name: Unit tests
         run: python -m unittest discover -s tests -v
 
@@ -39,8 +42,8 @@ jobs:
       - name: Verify reverse-GPS logic
         run: python reverse_gps.py verify
 
-      - name: Run reverse-GPS search
-        run: python reverse_gps.py scan --derive-limit 5000
+      - name: Run bounded reverse-GPS search
+        run: python reverse_gps.py scan --derive-limit 5000 --backend coincurve
 
       - name: Upload structural report
         uses: actions/upload-artifact@v4

@@ -30,7 +30,7 @@ asset trial load escape symbol story bomb picnic river aerobic mystery honey
 
 `python solver.py verify` reproduces that example exactly and validates its BIP-39 checksum.
 
-The project then checks candidate 12-word mnemonics against the prize address using BIP-39, BIP-32, secp256k1 and compressed/uncompressed legacy P2PKH derivation. The crypto path is implemented with the Python standard library only.
+The project then checks candidate 12-word mnemonics against the prize address using BIP-39, BIP-32, secp256k1 and compressed/uncompressed legacy P2PKH derivation. The baseline crypto path in `solver.py` is implemented with the Python standard library only.
 
 ## Structural attacks
 
@@ -41,7 +41,7 @@ The project then checks candidate 12-word mnemonics against the prize address us
 - automatically recovers the author's `38.8906 + 77.0044 -> 388906770044` worked selector;
 - tests selectors with indexing restarted at the whole-article, paragraph, and sentence level;
 - records every checksum-valid BIP-39 candidate;
-- searches first-through-fifth-letter null-cipher streams, forward and reversed, for instruction words such as `seed`, `gps`, `phone`, `third`, `twelve`, `latitude`, `longitude`, `position`, and `wallet`;
+- searches first-through-fifth-letter null-cipher streams, forward and reversed, for instruction words;
 - records paragraph/sentence initial and final-letter streams;
 - writes a machine-readable JSON report.
 
@@ -69,21 +69,100 @@ Every BIP-39 word found in a range is a possible selected word. Its position det
 12 selector digits
 ```
 
-The scanner applies the BIP-39 checksum before doing expensive wallet derivation. It starts at article, paragraph, and sentence boundaries and reports the size of any search space skipped because it exceeds the configured per-start combination ceiling.
+The scanner applies the BIP-39 checksum before wallet derivation. It includes article, paragraph, sentence, and literal `Example:` starts. `python reverse_gps.py verify` independently reconstructs the author's `388906770044` selector and `asset ... honey` seed.
 
-`python reverse_gps.py verify` independently reconstructs the author's `388906770044` selector and `asset ... honey` seed from the worked example.
+### Why sharding exists
 
-The default GitHub Actions pass derives at most 5,000 checksum-valid reverse candidates. The JSON report explicitly says whether enumeration and target-address derivation were exhaustive; a partial run must not be interpreted as “the target is impossible.”
+The first reverse run found **66,694,260** theoretical combinations at the structural starts, concentrated heavily around the author's Trithemian-seed examples. A single bounded CI job deliberately did not claim an exhaustive negative.
+
+`reverse_gps.py` now supports deterministic combination sharding:
+
+```bash
+python reverse_gps.py scan --shard-index 0 --shard-count 16
+```
+
+The Cartesian product is partitioned by prefixes, so shards do not overlap and a shard does not have to iterate through other shards' suffixes. `assigned_combinations` in every report shows the exact amount of work assigned to that shard.
+
+High-volume wallet derivation can use `coincurve`/libsecp256k1:
+
+```bash
+python3 -m pip install coincurve
+python reverse_gps.py scan --backend coincurve
+```
+
+The ordinary baseline solver remains dependency-free.
+
+## GitHub Actions: normal scan
+
+`.github/workflows/scan.yml` runs on pushes to `main`, pushes to the solver branch, pull requests to `main`, and manual `workflow_dispatch`.
+
+It runs:
+
+```text
+unit tests
+→ fetch article + official BIP-39 wordlist
+→ verify forward GPS example
+→ baseline hypotheses
+→ structural/null-cipher attack
+→ verify reverse GPS
+→ bounded reverse GPS attack
+```
+
+Artifacts:
+
+```text
+attack-report
+reverse-gps-report
+```
+
+The bounded reverse report explicitly contains `enumeration_complete` and `target_scan_complete`. `false` means the result is exploratory, not a proof that the target is absent.
+
+## GitHub Actions: exhaustive reverse-GPS scan
+
+A separate workflow keeps the expensive search away from every commit:
+
+```text
+.github/workflows/reverse-exhaustive.yml
+```
+
+Run it manually from **Actions → reverse-gps-exhaustive → Run workflow**.
+
+It launches **16 independent shards**. Each shard:
+
+- gets a disjoint part of every structural start's Cartesian product;
+- installs `coincurve` for fast secp256k1 public-key operations;
+- enumerates its assigned combinations;
+- checks BIP-39 checksum;
+- derives surviving candidates against the prize address;
+- uploads `reverse-gps-shard-N`.
+
+After all shard jobs finish, an aggregate job downloads the shard JSON files and creates:
+
+```text
+reverse-gps-exhaustive
+└── reverse-gps-exhaustive.json
+```
+
+The aggregate is considered exhaustive only when all 16 shards are present and every shard reports both `enumeration_complete=true` and `target_scan_complete=true`.
+
+This workflow is manual because a full run consumes substantially more GitHub Actions minutes than the normal PR scan.
 
 ## Requirements
 
-For a local run after this PR is merged:
+Local execution is optional; normal research iterations can be run entirely through GitHub Actions.
+
+Baseline/structural requirements:
 
 - **Python 3.11+**; CI uses Python 3.12.
-- No `pip install` and no `requirements.txt` are required.
-- Internet access is needed only for `python solver.py fetch`, which downloads the public article mirror and official BIP-39 English wordlist.
-- After `data/article.txt` and `data/english.txt` exist, the analysis can run offline.
-- Python/OpenSSL must expose RIPEMD-160. This is normally available on Ubuntu.
+- No third-party packages for `solver.py` and `attack_surface.py`.
+- Internet access only for `python solver.py fetch`.
+- Python/OpenSSL with RIPEMD-160 (normally present on Ubuntu).
+
+For fast reverse-GPS address derivation:
+
+```bash
+python3 -m pip install coincurve
+```
 
 Quick RIPEMD-160 check:
 
@@ -95,23 +174,22 @@ Expected output: `True`.
 
 ## First local run
 
-Local execution is optional because the same commands run in GitHub Actions.
-
 ```bash
 git clone https://github.com/Kolyn236/wealth-in-poetry_test.git
 cd wealth-in-poetry_test
 
-python3 --version
 python3 solver.py fetch
 python3 -m unittest discover -s tests -v
 python3 solver.py verify
 python3 solver.py scan --mode all
 python3 attack_surface.py all
 python3 reverse_gps.py verify
-python3 reverse_gps.py scan
+
+python3 -m pip install coincurve
+python3 reverse_gps.py scan --backend coincurve
 ```
 
-The generated files are:
+Generated files:
 
 ```text
 data/attack-report.json
@@ -134,34 +212,20 @@ Search null-cipher streams:
 python3 attack_surface.py null
 ```
 
-Run only structural selector scans:
-
-```bash
-python3 attack_surface.py scan
-```
-
-Measure the reverse-GPS candidate space without deriving addresses:
+Measure reverse-GPS candidate space without deriving addresses:
 
 ```bash
 python3 reverse_gps.py scan --derive-limit 0
 ```
 
-Increase the number of checksum-valid reverse candidates whose Bitcoin addresses are derived:
+Run one of 16 shards locally:
 
 ```bash
-python3 reverse_gps.py scan --derive-limit 20000
-```
-
-Raise the per-start combination ceiling explicitly:
-
-```bash
-python3 reverse_gps.py scan --max-combinations-per-start 10000000
-```
-
-Test another GPS/number hypothesis directly:
-
-```bash
-python3 solver.py scan --mode gps --selector 388906770044
+python3 reverse_gps.py scan \
+  --shard-index 7 \
+  --shard-count 16 \
+  --backend coincurve \
+  --derive-limit 1000000
 ```
 
 Test additional derivation paths:
@@ -172,27 +236,7 @@ python3 solver.py scan \
   --path "m/44'/0'/0'/0/1"
 ```
 
-The structural and reverse scanners accept the same path override.
-
-## GitHub Actions
-
-`.github/workflows/scan.yml` runs on:
-
-- pushes to `main`;
-- pushes to `agent/wealth-poetry-solver` while this PR is open;
-- pull requests to `main`;
-- manual `workflow_dispatch`.
-
-It runs tests, fetches puzzle data, verifies both forward and reverse versions of the worked GPS example, runs all current search layers, and uploads two artifacts:
-
-```text
-attack-report
-reverse-gps-report
-```
-
-Open a successful workflow run and scroll to **Artifacts** to download the reports. This means a local environment is not required for normal puzzle iterations.
-
-If Actions are disabled for the repository, enable them in **Settings → Actions → General** before relying on CI. Local execution does not depend on GitHub Actions.
+The structural and reverse scanners accept path overrides.
 
 ## Data provenance
 
@@ -201,17 +245,17 @@ If Actions are disabled for the repository, enable them in **Settings → Action
 - the BIP-39 English wordlist from the Bitcoin BIPs repository;
 - the article text mirror from `HomelessPhD/Wealth_in_Poetry`.
 
-We do not commit downloaded puzzle data into this repository.
+Downloaded puzzle data and generated reports are not committed.
 
 ## Search strategy
 
-The working model is now split into three independently testable layers:
+The working model is split into independently testable layers:
 
-1. **Forward positional search** — guess or extract a selector, then select words.
+1. **Forward positional search** — obtain a selector, then select words.
 2. **Structural/null-cipher search** — look for an instruction or selector hidden in article structure.
-3. **Reverse positional search** — infer selector digits from where BIP-39 words already occur.
+3. **Reverse positional search** — infer selector digits from BIP-39 word positions.
 
-Every candidate should pass the same funnel:
+Every candidate follows the same funnel:
 
 ```text
 positions -> 12 words -> BIP-39 checksum -> BIP-32 -> P2PKH -> target address

@@ -51,6 +51,36 @@ class ReverseGpsTests(unittest.TestCase):
         self.assertEqual(example.start_word, 3)
         self.assertEqual(solver.tokenize(text)[example.start_word], "Such")
 
+    def test_shards_partition_product_without_overlap(self):
+        blocks = []
+        sizes = [2, 3, 2] + [1] * 9
+        for block, size in enumerate(sizes):
+            blocks.append([
+                reverse_gps.Choice(block, max(1, block * 10) + i, i, f"w{block}_{i}", i)
+                for i in range(size)
+            ])
+
+        full = list(reverse_gps.iter_sharded_combos(blocks, 0, 1))
+        shards = [list(reverse_gps.iter_sharded_combos(blocks, i, 4)) for i in range(4)]
+        flattened = [combo for shard in shards for combo in shard]
+
+        self.assertEqual(len(full), 12)
+        self.assertEqual(sum(len(shard) for shard in shards), len(full))
+        self.assertEqual({tuple(item.word for item in combo) for combo in flattened},
+                         {tuple(item.word for item in combo) for combo in full})
+
+    def test_assigned_counts_sum_to_full_space(self):
+        blocks = []
+        sizes = [5, 4, 3] + [1] * 9
+        for block, size in enumerate(sizes):
+            blocks.append([
+                reverse_gps.Choice(block, max(1, block * 10) + i, i, f"w{block}_{i}", i)
+                for i in range(size)
+            ])
+        assigned = [reverse_gps.assigned_combination_count(blocks, i, 16) for i in range(16)]
+        self.assertEqual(sum(assigned), reverse_gps.combination_count(blocks))
+        self.assertLessEqual(max(assigned) - min(assigned), 12)
+
 
 if __name__ == "__main__":
     unittest.main()
