@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/reverse-gps-exhaustive
+  pull_request:
+    branches:
+      - agent/wealth-poetry-solver
   workflow_dispatch:
 
 jobs:
