@@ -15,16 +15,28 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
       - name: Unit tests
         run: python -m unittest discover -s tests -v
+
       - name: Fetch public puzzle data
         run: python solver.py fetch
+
       - name: Verify author's worked GPS example
         run: python solver.py verify
-      - name: Run current hypotheses
+
+      - name: Run baseline hypotheses
         run: python solver.py scan --mode all
-      - name: Print null-cipher streams
-        run: python solver.py null --from-char 1 --to-char 5 --limit 600
+
+      - name: Run structural attack surface
+        run: python attack_surface.py all
+
+      - name: Upload structural report
+        uses: actions/upload-artifact@v4
+        with:
+          name: attack-report
+          path: data/attack-report.json

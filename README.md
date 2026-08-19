@@ -2,78 +2,146 @@
 
 Research code for the public Trithemius **“Securing Wealth in Poetry”** Bitcoin puzzle.
 
-Target P2PKH address:
+Target legacy P2PKH address:
 
 ```text
 1K4ezpLybootYF23TM4a8Y4NyP7auysnRo
 ```
 
-## What this PR tests
+## What the solver verifies
 
-The article itself gives us an unusually strong specification for one hiding method. For the worked U.S. Supreme Court example, GPS digits `388906770044` become positions:
+The article gives a worked GPS-position example. The digits:
+
+```text
+388906770044
+```
+
+become 1-based positions:
 
 ```text
 3, 18, 28, 39, 40, 56, 67, 77, 80, 90, 104, 114
 ```
 
-Those positions select:
+and select:
 
 ```text
 asset trial load escape symbol story bomb picnic river aerobic mystery honey
 ```
 
-`solver.py verify` reproduces this exactly. That test matters because punctuation/tokenization errors shift every later word position.
+`python solver.py verify` reproduces that example exactly and validates its BIP-39 checksum.
 
-The first search pass covers:
+The project then checks candidate 12-word mnemonics against the prize address using BIP-39, BIP-32, secp256k1 and compressed/uncompressed legacy P2PKH derivation. The crypto path is implemented with the Python standard library only.
 
-- the already-known contiguous BIP-39-word baseline;
-- GPS/phone-like 12-digit selectors at every possible start offset in the article;
-- several geographic hypotheses mentioned by or adjacent to the article;
-- null-cipher streams (first through fifth letters of words);
-- BIP-39 checksum validation;
-- BIP-39 seed generation, BIP-32 private derivation and compressed/uncompressed legacy P2PKH generation using only Python's standard library.
+## Structural attacks
 
-## Run
+`attack_surface.py` generates and tests hypotheses rather than guessing seed phrases manually. It currently:
+
+- extracts every literal number/date/coordinate-like fragment from the article;
+- combines adjacent numeric fragments when they naturally form a 12-digit selector;
+- automatically recovers the author's `38.8906 + 77.0044 -> 388906770044` worked selector;
+- tests selectors with indexing restarted at the whole-article, paragraph, and sentence level;
+- records every checksum-valid BIP-39 candidate;
+- searches first-through-fifth-letter null-cipher streams, forward and reversed, for instruction words such as `seed`, `gps`, `phone`, `third`, `twelve`, `latitude`, `longitude`, `position`, and `wallet`;
+- records paragraph/sentence initial and final-letter streams;
+- writes a machine-readable JSON report.
+
+`hypotheses.json` remains available for manually supplied geographic selectors.
+
+## Requirements
+
+For a local run after this PR is merged:
+
+- **Python 3.11+**; CI uses Python 3.12.
+- No `pip install` and no `requirements.txt` are required.
+- Internet access is needed only for `python solver.py fetch`, which downloads the public article mirror and official BIP-39 English wordlist.
+- After `data/article.txt` and `data/english.txt` exist, the analysis can run offline.
+- Python/OpenSSL must expose RIPEMD-160. This is normally available on Ubuntu.
+
+Quick RIPEMD-160 check:
 
 ```bash
-python solver.py fetch
-python -m unittest discover -s tests -v
-python solver.py verify
-python solver.py scan --mode all
-python solver.py null
+python3 -c "import hashlib; print('ripemd160' in hashlib.algorithms_available)"
 ```
 
-To test another GPS/number hypothesis without changing code:
+Expected output: `True`.
+
+## First local run
 
 ```bash
-python solver.py scan --mode gps --selector 388906770044
+git clone https://github.com/Kolyn236/wealth-in-poetry_test.git
+cd wealth-in-poetry_test
+
+python3 --version
+python3 solver.py fetch
+python3 -m unittest discover -s tests -v
+python3 solver.py verify
+python3 solver.py scan --mode all
+python3 attack_surface.py all
 ```
 
-To test additional derivation paths:
+The last command writes `data/attack-report.json`. The `data/` directory is intentionally ignored by Git.
+
+### Useful focused commands
+
+Show number-derived selectors:
 
 ```bash
-python solver.py scan \
+python3 attack_surface.py numbers
+```
+
+Search null-cipher streams:
+
+```bash
+python3 attack_surface.py null
+```
+
+Run only structural selector scans:
+
+```bash
+python3 attack_surface.py scan
+```
+
+Test another GPS/number hypothesis directly:
+
+```bash
+python3 solver.py scan --mode gps --selector 388906770044
+```
+
+Test additional derivation paths:
+
+```bash
+python3 solver.py scan \
   --path "m/44'/0'/0'/0/0" \
   --path "m/44'/0'/0'/0/1"
 ```
 
+The structural scanner accepts the same path override:
+
+```bash
+python3 attack_surface.py all \
+  --path "m/44'/0'/0'/0/0" \
+  --path "m/44'/0'/0'/0/1"
+```
+
+## GitHub Actions
+
+`.github/workflows/scan.yml` runs on pushes to the solver branch, pull requests to `main`, and manual `workflow_dispatch`.
+
+It runs tests, fetches puzzle data, verifies the worked GPS example, runs both search layers, and uploads `data/attack-report.json` as the `attack-report` workflow artifact.
+
+If Actions are disabled for the repository, enable them in **Settings → Actions → General** before relying on CI. Local execution does not depend on GitHub Actions.
+
 ## Data provenance
 
-`solver.py fetch` downloads data at runtime rather than committing copies:
+`python solver.py fetch` downloads:
 
-- BIP-39 English wordlist from the Bitcoin BIPs repository;
-- article text mirror from `HomelessPhD/Wealth_in_Poetry`.
+- the BIP-39 English wordlist from the Bitcoin BIPs repository;
+- the article text mirror from `HomelessPhD/Wealth_in_Poetry`.
 
-The downloaded files live under `data/` and are ignored by Git.
+We do not commit downloaded puzzle data into this repository.
 
-## Next hypotheses
+## Search strategy
 
-The current solver is deliberately modular. Useful next attacks are:
+The main working hypothesis is that the article may hide either the seed words themselves through positional indexing, or an instruction/selector that tells us how to recover those words.
 
-1. derive selectors from every number/date in the article instead of hand-entering coordinates;
-2. search paragraph/sentence-local word indexing rather than only whole-article offsets;
-3. interpret null-cipher output as an instruction or number selector rather than as seed words directly;
-4. enumerate plausible coordinate formatting/precision variants for geographic entities in the story;
-5. extend wallet derivation candidates if the 12 words are found but BIP-44 path `m/44'/0'/0'/0/0` is not the prize address.
-
-The goal is to keep each hypothesis deterministic and testable so we can rule out large classes of ideas instead of guessing seed phrases manually.
+The code keeps those stages separate. Every hypothesis should be reproducible and falsifiable: produce positions, produce 12 words, pass BIP-39 checksum, derive addresses, then compare with the known prize address.
