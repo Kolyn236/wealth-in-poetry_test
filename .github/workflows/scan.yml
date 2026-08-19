@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - agent/wealth-poetry-solver
   pull_request:
     branches:
@@ -35,8 +36,20 @@ jobs:
       - name: Run structural attack surface
         run: python attack_surface.py all
 
+      - name: Verify reverse-GPS logic
+        run: python reverse_gps.py verify
+
+      - name: Run reverse-GPS search
+        run: python reverse_gps.py scan --derive-limit 5000
+
       - name: Upload structural report
         uses: actions/upload-artifact@v4
         with:
           name: attack-report
           path: data/attack-report.json
+
+      - name: Upload reverse-GPS report
+        uses: actions/upload-artifact@v4
+        with:
+          name: reverse-gps-report
+          path: data/reverse-gps-report.json
