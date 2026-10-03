@@ -1,0 +1,8 @@
+version: 1
+executor:
+  type: docker-compose
+  file: compose.verify.yaml
+phases:
+  - id: tests
+    service: verify
+    command: [bash, scripts/verify.sh]
