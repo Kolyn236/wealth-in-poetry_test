@@ -1,0 +1,58 @@
+name: puzzle-scan
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - agent/wealth-poetry-solver
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install fast reverse-search backend
+        run: python -m pip install --disable-pip-version-check coincurve
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Fetch public puzzle data
+        run: python solver.py fetch
+
+      - name: Verify author's worked GPS example
+        run: python solver.py verify
+
+      - name: Run baseline hypotheses
+        run: python solver.py scan --mode all
+
+      - name: Run structural attack surface
+        run: python attack_surface.py all
+
+      - name: Verify reverse-GPS logic
+        run: python reverse_gps.py verify
+
+      - name: Run bounded reverse-GPS search
+        run: python reverse_gps.py scan --derive-limit 5000 --backend coincurve
+
+      - name: Upload structural report
+        uses: actions/upload-artifact@v4
+        with:
+          name: attack-report
+          path: data/attack-report.json
+
+      - name: Upload reverse-GPS report
+        uses: actions/upload-artifact@v4
+        with:
+          name: reverse-gps-report
+          path: data/reverse-gps-report.json
