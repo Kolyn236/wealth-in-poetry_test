@@ -1,0 +1,8 @@
+services:
+  verify:
+    build:
+      context: .
+      dockerfile: Dockerfile.verify
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:ro

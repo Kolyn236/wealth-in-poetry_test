@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "reviewer_profile": "reviewer",
+  "auto_publish_draft": true,
+  "auto_enqueue_review": true,
+  "auto_rework_on_changes": true,
+  "max_review_cycles": 2
+}
